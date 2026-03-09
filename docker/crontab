@@ -1,0 +1,18 @@
+# /app/docker/crontab — Crontab de supercronic para rss-orchestrator
+#
+# supercronic corre DENTRO del contenedor: sin docker.sock, sin root.
+# El comando se ejecuta directamente como proceso Python en el mismo
+# contenedor donde viven el código y las variables de entorno.
+#
+# Formato estándar cron: min  hora  día-mes  mes  día-semana  comando
+#
+# Zona horaria: la del contenedor (UTC por defecto con python:3.12-slim).
+# Para cambiar: agrega TZ=Europe/Madrid en la sección environment del
+# servicio orchestrator en docker-compose.yml.
+#
+# Cambiar hora → edita este archivo en el host → docker compose restart orchestrator
+
+# Digest diario a las 06:00 UTC (= 08:00 CEST / 07:00 CET)
+# Sin --mark: los artículos NUNCA se marcan como leídos automáticamente.
+# El marcado lo hace el usuario explícitamente desde Telegram (botones o reacciones).
+39 15 * * * python -m src.cli digest

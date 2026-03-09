@@ -1,0 +1,55 @@
+# ── Entorno virtual y cache de Python ──────────────────────────────────────
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ── Git ─────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── Credenciales (NUNCA en la imagen) ───────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Estado en tiempo de ejecución (montados como volúmenes) ─────────────────
+state/
+cache/
+tests/logs/
+
+# ── Tests (no necesarios en producción) ─────────────────────────────────────
+tests/
+.pytest_cache/
+pytest.ini
+setup.cfg
+
+# ── Documentación y bitácora ─────────────────────────────────────────────────
+bitacora/
+*.md
+!README.md
+
+# ── Deployment y scripts de mantenimiento ───────────────────────────────────
+deployment/
+scripts/
+
+# ── Herramientas de desarrollo ───────────────────────────────────────────────
+.flake8
+.mypy.ini
+.black
+pyproject.toml
+setup.py
+setup.sh
+Makefile
+
+# ── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo

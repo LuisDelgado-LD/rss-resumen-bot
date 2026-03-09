@@ -1,0 +1,82 @@
+# =============================================================================
+# docker-compose.yml — RSS Digest Bot
+#
+# Servicios:
+#   bot          Bot interactivo de Telegram, siempre activo (polling)
+#   orchestrator Ejecuta supercronic internamente para disparar el digest
+#                cada 24 h. Sin docker.sock, sin contenedor cron separado.
+#
+# Uso rápido:
+#   docker compose up -d --build
+#   docker compose run --rm orchestrator python -m src.cli digest  ← manual
+#
+# Ver deployment/README_DOCKER.md para instrucciones completas.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # BOT — Polling de Telegram, maneja /url, /guardar, botones, callbacks
+  # ---------------------------------------------------------------------------
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rss-resume-bot:latest
+    container_name: rss-bot
+    command: python -m src.bot_runner
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Estado persistente: message_map, article_urls, URLs guardadas
+      - ./state:/app/state
+      # Caché de URLs de scraping que fallaron (evita reintentos inútiles)
+      - ./cache:/app/cache
+      # Prompts del LLM — editables en caliente sin recompilar
+      - ./utils/prompts:/app/utils/prompts
+      # Configuración de topics del supergrupo de Telegram
+      - ./utils/topics.json:/app/utils/topics.json
+    networks:
+      - rss-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # ORCHESTRATOR — Ejecuta supercronic que llama al digest cada 24 h
+  #
+  # supercronic corre DENTRO de este contenedor: sin docker.sock,
+  # sin contenedor extra, sin privilegios adicionales.
+  # El crontab está en docker/crontab y es editable en caliente.
+  # ---------------------------------------------------------------------------
+  orchestrator:
+    image: rss-resume-bot:latest   # reutiliza la imagen compilada por `bot`
+    container_name: rss-orchestrator
+    command: supercronic /app/docker/crontab
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - bot
+    volumes:
+      - ./state:/app/state
+      - ./cache:/app/cache
+      - ./utils/prompts:/app/utils/prompts
+      - ./utils/topics.json:/app/utils/topics.json
+      # Crontab editable en caliente: edita docker/crontab + restart orchestrator
+      - ./docker/crontab:/app/docker/crontab:ro
+    networks:
+      - rss-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "10"
+
+# =============================================================================
+# RED
+# =============================================================================
+networks:
+  rss-network:
+    driver: bridge

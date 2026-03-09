@@ -1,0 +1,23 @@
+{
+  "_comment": "Mapeo de categorías de TT-RSS a topic_id de Telegram Supergroup",
+  "_generated": "Auto-generado con scripts/get_supergroup_topics.py",
+  "_instructions": [
+    "1. Los nombres de categoría deben coincidir EXACTAMENTE con los de TT-RSS",
+    "2. Edita los nombres de los topics para que coincidan con tus categorías",
+    "3. Elimina los topics que no necesites"
+  ],
+  "categories": {
+    "DevOps": 2,
+    "General": 1,
+    "Linux": 9,
+    "Noticias Linux": 3,
+    "Noticias general": 10,
+    "Noticias Seguridad": 4,
+    "Opinion": 5,
+    "Seguridad": 11,
+    "Tutoriales Seguridad": 6,
+    "Uncategorized": 12,
+    "muertos": 7,
+    "random": 8
+  }
+}
