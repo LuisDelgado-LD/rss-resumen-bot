@@ -387,33 +387,51 @@ class TelegramBot:
         # /url ID
         if text.startswith('/url'):
             parts = text.split()
+
+            # Determinar el ID: explícito en el comando o desde reply
+            article_id = None
             if len(parts) == 2:
                 try:
                     article_id = int(parts[1])
-                    article = self._resolve_article(article_id)
-
-                    if article:
-                        response = f"🔗 Artículo [{article_id}]:\n{article['link']}"
-                        logger.debug(f"← handle_command() → URL encontrada")
-                        logger.info(f"✅ URL encontrada para artículo {article_id}")
-                    else:
-                        response = f"⚠️ No se encontró el artículo {article_id}"
-                        logger.warning(f"⚠️  Artículo {article_id} no encontrado")
-
-                    self._send_message(chat_id, response, topic_id=topic_id)
-
                 except ValueError:
                     response = "❌ ID inválido. Uso: /url 123456"
                     self._send_message(chat_id, response, topic_id=topic_id)
                     logger.debug(f"← handle_command() → ID inválido")
+            elif len(parts) == 1:
+                # Sin ID explícito → intentar extraer del reply
+                ids, reply_warning = self._extract_ids_from_reply(message)
+                if reply_warning:
+                    self._send_message(chat_id, reply_warning, topic_id=topic_id)
+                    logger.debug("← handle_command() → /url TextQuote inválido")
+                elif ids:
+                    article_id = ids[0]
+                    logger.info(f"ID extraído desde reply para /url: {article_id}")
+                else:
+                    response = (
+                        "❌ Indicá un ID o citá el texto de un artículo.\n"
+                        "Ejemplo: /url 123456"
+                    )
+                    self._send_message(chat_id, response, topic_id=topic_id)
+                    logger.debug("← handle_command() → /url sin ID ni reply")
             else:
                 response = "❌ Uso: /url [ID]\nEjemplo: /url 133201"
                 self._send_message(chat_id, response, topic_id=topic_id)
                 logger.debug(f"← handle_command() → formato incorrecto")
+
+            if article_id is not None:
+                article = self._resolve_article(article_id)
+                if article:
+                    response = f"🔗 Artículo [{article_id}]:\n{article['link']}"
+                    logger.debug(f"← handle_command() → URL encontrada")
+                    logger.info(f"✅ URL encontrada para artículo {article_id}")
+                else:
+                    response = f"⚠️ No se encontró el artículo {article_id}"
+                    logger.warning(f"⚠️  Artículo {article_id} no encontrado")
+                self._send_message(chat_id, response, topic_id=topic_id)
         
         # /guardar ID1 [ID2 ID3 ...]
         elif text.startswith('/guardar'):
-            self._handle_guardar_command(text, chat_id, user, topic_id=topic_id)
+            self._handle_guardar_command(text, chat_id, user, topic_id=topic_id, message=message)
         
         # /ayuda
         elif text.startswith('/ayuda') or text.startswith('/help'):
@@ -489,15 +507,95 @@ class TelegramBot:
         logger.debug(f"← _resolve_article() → None")
         return None
 
-    def _handle_guardar_command(self, text: str, chat_id: int, user: str, topic_id: int = None):
+    def _extract_ids_from_reply(self, message: dict) -> tuple[list[int], str | None]:
+        """
+        Extrae IDs de artículo desde un mensaje citado (reply/quote).
+
+        Estrategia:
+        1. TextQuote (texto seleccionado manualmente por el usuario):
+           - Se espera que contenga SOLO dígitos (el ID sin corchetes)
+           - Si contiene caracteres no numéricos → se considera inválido,
+             se avisa al usuario y se sugieren los IDs del fallback
+        2. Fallback — texto completo del mensaje citado:
+           - Busca IDs en formato [123456] con corchetes
+
+        Args:
+            message: Mensaje de Telegram que contiene reply_to_message
+
+        Returns:
+            Tupla (ids, warning):
+            - ids: Lista de IDs encontrados (puede ser vacía)
+            - warning: Mensaje de advertencia para mostrar al usuario, o None
+        """
+        logger.debug("→ _extract_ids_from_reply()")
+
+        reply_to = message.get("reply_to_message")
+        if not reply_to:
+            logger.debug("← _extract_ids_from_reply() → ([], None) sin reply")
+            return [], None
+
+        def find_ids_bracketed(text: str) -> list[int]:
+            """Busca IDs en formato [123456] con corchetes."""
+            return [int(m) for m in re.findall(r'\[(\d+)\]', text)]
+
+        # Paso 1: TextQuote — el usuario seleccionó texto específico
+        quote = message.get("quote")
+        if quote:
+            quote_text = quote.get("text", "").strip()
+            is_manual = quote.get("is_manual", False)
+
+            logger.debug(
+                f"TextQuote detectado (manual={is_manual}): {repr(quote_text[:100])}"
+            )
+
+            # Verificar si el quote contiene exactamente un ID (solo dígitos)
+            if quote_text.isdigit():
+                ids = [int(quote_text)]
+                logger.debug(f"← _extract_ids_from_reply() → {ids} (TextQuote numérico)")
+                return ids, None
+
+            # Contiene caracteres no numéricos → inválido, calcular sugerencias
+            fallback_ids = find_ids_bracketed(reply_to.get("text", ""))
+            warning = (
+                f"⚠️ El texto seleccionado contiene caracteres inesperados: "
+                f"{repr(quote_text[:80])}\n"
+            )
+            if fallback_ids:
+                warning += (
+                    f"💡 IDs encontrados en el mensaje completo: "
+                    f"{', '.join(str(i) for i in fallback_ids)}\n"
+                    f"Podés usar: /guardar {' '.join(str(i) for i in fallback_ids)}"
+                )
+            else:
+                warning += "No se encontraron IDs en el mensaje citado."
+
+            logger.warning(
+                f"⚠️  TextQuote con caracteres no numéricos: {repr(quote_text[:80])} "
+                f"— sugeridos: {fallback_ids}"
+            )
+            return [], warning
+
+        # Paso 2: fallback — sin TextQuote, usar texto completo con corchetes
+        full_text = reply_to.get("text", "")
+        ids = find_ids_bracketed(full_text)
+
+        if ids:
+            logger.debug(f"← _extract_ids_from_reply() → {ids} (mensaje completo)")
+        else:
+            logger.debug("← _extract_ids_from_reply() → [] (sin IDs en ninguna fuente)")
+
+        return ids, None
+
+    def _handle_guardar_command(self, text: str, chat_id: int, user: str, topic_id: int = None, message: dict = None):
         """
         Maneja el comando /guardar [ID1 ID2 ...] para guardar artículos en Wallabag.
-        
+
         Args:
             text: Texto del comando
             chat_id: ID del chat
             user: Nombre del usuario
             topic_id: ID del topic (supergroup) donde responder
+            message: Mensaje completo de Telegram (necesario para extraer IDs de reply)
         """
         logger.debug(f"→ _handle_guardar_command(text={text}, user={user})")
         
@@ -512,26 +610,38 @@ class TelegramBot:
             logger.debug("← _handle_guardar_command()")
             return
         
-        # Extraer IDs del comando
+        # Extraer IDs: primero del comando, si no hay usar reply
         parts = text.split()
-        if len(parts) < 2:
-            response = "❌ Uso: /guardar [ID1] [ID2] ...\nEjemplo: /guardar 123456 123457"
-            self._send_message(chat_id, response)
-            logger.debug("← _handle_guardar_command() → formato incorrecto")
-            return
-        
-        # Parsear IDs
         article_ids = []
-        for part in parts[1:]:
-            try:
-                article_ids.append(int(part))
-            except ValueError:
-                logger.warning(f"ID inválido ignorado: {part}")
+
+        if len(parts) >= 2:
+            # IDs explícitos en el comando: /guardar 123456 123457
+            for part in parts[1:]:
+                try:
+                    article_ids.append(int(part))
+                except ValueError:
+                    logger.warning(f"⚠️  ID inválido ignorado en comando: {part!r}")
+            logger.debug(f"IDs desde comando: {article_ids}")
+        else:
+            # Sin IDs explícitos → intentar extraer del mensaje citado
+            article_ids, reply_warning = self._extract_ids_from_reply(message)
+            if reply_warning:
+                # TextQuote inválido: mostrar advertencia con sugerencias y salir
+                self._send_message(chat_id, reply_warning, topic_id=topic_id)
+                logger.debug("← _handle_guardar_command() → TextQuote inválido")
+                return
+            if article_ids:
+                logger.info(f"IDs extraídos desde reply: {article_ids}")
         
         if not article_ids:
-            response = "❌ No se encontraron IDs válidos.\nEjemplo: /guardar 123456"
-            self._send_message(chat_id, response)
-            logger.debug("← _handle_guardar_command() → sin IDs válidos")
+            response = (
+                "❌ No se encontraron IDs.\n"
+                "Opciones:\n"
+                "• Escribe los IDs: /guardar 123456 123457\n"
+                "• Cita el texto de un artículo y responde /guardar"
+            )
+            self._send_message(chat_id, response, topic_id=topic_id)
+            logger.debug("← _handle_guardar_command() → sin IDs (ni en comando ni en reply)")
             return
         
         logger.info(f"Guardando {len(article_ids)} artículos en Wallabag: {article_ids}")
