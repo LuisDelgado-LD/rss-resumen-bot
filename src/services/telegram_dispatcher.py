@@ -311,25 +311,40 @@ class TelegramDispatcher:
     def _extract_article_ids(self, text: str) -> list[int]:
         """
         Extrae los IDs de artículos mencionados en un texto.
-        Busca referencias en formato [123] (número entre corchetes).
-        
+
+        Soporta dos formatos generados por el LLM:
+          - Un solo ID:       [184951]
+          - Múltiples IDs:    [187642, 186522] o [187642,186522]
+
+        Retorna IDs únicos en orden de aparición (sin duplicados).
+
         Args:
             text: Texto del párrafo
-            
+
         Returns:
-            Lista de IDs de artículos mencionados
+            Lista de IDs únicos de artículos mencionados
         """
-        # Patrón: [número]
-        pattern = r'\[(\d+)\]'
+        # Captura el contenido entre corchetes (dígitos y comas)
+        pattern = r'\[(\d+(?:,\s*\d+)*)\]'
         matches = re.findall(pattern, text)
-        
-        # Convertir a enteros
-        article_ids = [int(match) for match in matches]
-        
-        logger.debug(f"Extraídos {len(article_ids)} IDs del párrafo: {article_ids[:5]}{'...' if len(article_ids) > 5 else ''}")
-        
+
+        # Aplanar y deduplicar preservando orden de aparición
+        seen = set()
+        article_ids = []
+        for match in matches:
+            for part in match.split(','):
+                aid = int(part.strip())
+                if aid not in seen:
+                    seen.add(aid)
+                    article_ids.append(aid)
+
+        logger.debug(
+            f"Extraídos {len(article_ids)} IDs del párrafo: "
+            f"{article_ids[:5]}{{'...' if len(article_ids) > 5 else ''}}"
+        )
+
         return article_ids
-    
+
     def _send_final_summary_message(
         self,
         total_categories: int,
