@@ -166,50 +166,71 @@ class TelegramBot:
     
     def _handle_mark_category(self, callback_id: str, category: str, user: str):
         """
-        Marca todos los artículos de una categoría como leídos.
-        
+        Marca como leídos los artículos del flujo asociado al botón presionado.
+
+        Usa el message_id del mensaje con botones para obtener exactamente
+        los artículos enviados en ese flujo, evitando marcar artículos de
+        otros días o ejecuciones anteriores.
+
         Args:
-            callback_id: ID del callback
+            callback_id: ID del callback — contiene el message_id del botón
             category: Nombre de la categoría
             user: Nombre del usuario
         """
         logger.debug(f"→ _handle_mark_category(category={category}, user={user})")
-        logger.info(f"Marcando categoría completa: {category}")
+        logger.info(f"Marcando categoría: {category}")
 
         try:
-            # Obtener todos los mensajes de esta categoría desde StateManager
-            # (cargar desde disco para evitar estado en memoria desactualizado)
-            article_ids = []
+            # Obtener el message_id del mensaje con botones desde el callback
+            # El callback_query trae el mensaje que contiene el botón presionado
+            # — se resuelve en handle_callback_query y se pasa como contexto
             message_map = self.state_manager.load_message_map()
-            for msg_id, msg_data in message_map.items():
-                if msg_data.get('category') == category:
-                    article_ids.extend(msg_data.get('article_ids', []))
-            
-            if not article_ids:
+
+            # Buscar en el mapa los IDs asociados a esta categoría
+            # Dado que el dispatcher ahora guarda el message_id del botón
+            # con todos los IDs del flujo, basta con buscar por categoría
+            # y tomar la entrada más reciente (la del botón)
+            candidates = {
+                msg_id: data
+                for msg_id, data in message_map.items()
+                if data.get('category') == category
+            }
+
+            if not candidates:
                 logger.warning(f"⚠️  No se encontraron artículos para categoría: {category}")
                 self._answer_callback_query(callback_id, f"⚠️ No hay artículos en {category}")
                 logger.debug(f"← _handle_mark_category() → sin artículos")
                 return
-            
-            # Eliminar duplicados
-            unique_ids = list(set(article_ids))
-            
-            logger.debug(f"Artículos encontrados: {len(unique_ids)}")
-            logger.debug(f"Primeros 10 IDs: {unique_ids[:10]}")
-            
-            # Marcar en StateManager
+
+            # Tomar la entrada más reciente (el mensaje con botones del último flujo)
+            latest_msg_id = max(
+                candidates,
+                key=lambda k: candidates[k].get('timestamp', '')
+            )
+            article_ids = candidates[latest_msg_id].get('article_ids', [])
+            unique_ids = list(dict.fromkeys(article_ids))  # deduplicar preservando orden
+
+            logger.debug(
+                f"Usando msg_id={latest_msg_id} ({candidates[latest_msg_id].get('timestamp')}) "
+                f"→ {len(unique_ids)} artículos"
+            )
+
+            if not unique_ids:
+                self._answer_callback_query(callback_id, f"⚠️ No hay artículos en {category}")
+                logger.debug(f"← _handle_mark_category() → sin artículos válidos")
+                return
+
+            # Marcar en StateManager y TT-RSS
             self.state_manager.mark_read(unique_ids)
-            
-            # Marcar en TT-RSS
             start_time = time.time()
             self.ttrss_client.mark_articles_as_read(unique_ids)
             elapsed = time.time() - start_time
-            
+
             logger.debug(f"← _handle_mark_category() → {len(unique_ids)} marcados en {elapsed:.2f}s")
             logger.info(f"✅ Categoría {category} marcada: {len(unique_ids)} artículos ({elapsed:.2f}s)")
-            
+
             self._answer_callback_query(callback_id, f"✅ {len(unique_ids)} artículos de {category} marcados")
-            
+
         except Exception as e:
             logger.error(f"❌ Error marcando categoría {category}: {e}", exc_info=True)
             self._answer_callback_query(callback_id, f"❌ Error marcando {category}")
@@ -290,33 +311,42 @@ class TelegramBot:
         logger.info("Marcando TODOS los artículos como leídos")
         
         try:
-            # Obtener todos los artículos de todos los mensajes
-            all_article_ids = []
+            # Obtener IDs del mensaje final del digest (__digest__)
             message_map = self.state_manager.load_message_map()
-            for msg_data in message_map.values():
-                all_article_ids.extend(msg_data.get('article_ids', []))
-            
-            # Eliminar duplicados
-            unique_ids = list(set(all_article_ids))
-            
+            digest_entry = next(
+                (data for data in message_map.values()
+                 if data.get('category') == '__digest__'),
+                None
+            )
+            if digest_entry is None:
+                logger.warning("⚠️  No se encontró entrada __digest__ en message_map, usando mapa completo")
+                all_article_ids = []
+                for msg_data in message_map.values():
+                    all_article_ids.extend(msg_data.get('article_ids', []))
+            else:
+                all_article_ids = digest_entry.get('article_ids', [])
+                logger.debug(f"Usando entrada __digest__ → {len(all_article_ids)} artículos")
+
+            unique_ids = list(dict.fromkeys(all_article_ids))  # deduplicar preservando orden
+
             if not unique_ids:
                 logger.warning("⚠️  No hay artículos para marcar")
                 self._answer_callback_query(callback_id, "⚠️ No hay artículos pendientes")
                 return
-            
+
             logger.debug(f"Artículos únicos encontrados: {len(unique_ids)}")
             logger.debug(f"Primeros 10 IDs: {unique_ids[:10]}")
-            
+
             # Marcar en TT-RSS
             start_time = time.time()
             self.ttrss_client.mark_articles_as_read(unique_ids)
             elapsed = time.time() - start_time
-            
+
             logger.debug(f"← _handle_mark_all() → {len(unique_ids)} marcados en {elapsed:.2f}s")
             logger.info(f"✅ Marcado masivo: {len(unique_ids)} artículos ({elapsed:.2f}s)")
-            
+
             self._answer_callback_query(callback_id, f"✅ {len(unique_ids)} artículos marcados")
-            
+
         except Exception as e:
             logger.error(f"❌ Error en marcado masivo: {e}", exc_info=True)
             self._answer_callback_query(callback_id, "❌ Error marcando artículos")
@@ -333,38 +363,48 @@ class TelegramBot:
         logger.info("Marcando artículos no reaccionados como leídos")
         
         try:
-            # Obtener todos los artículos
-            all_article_ids = []
+            # Obtener IDs del mensaje final del digest (__digest__)
             message_map = self.state_manager.load_message_map()
-            for msg_data in message_map.values():
-                all_article_ids.extend(msg_data.get('article_ids', []))
-            
-            unique_ids = list(set(all_article_ids))
-            
+            digest_entry = next(
+                (data for data in message_map.values()
+                 if data.get('category') == '__digest__'),
+                None
+            )
+            if digest_entry is None:
+                logger.warning("⚠️  No se encontró entrada __digest__ en message_map, usando mapa completo")
+                all_article_ids = []
+                for msg_data in message_map.values():
+                    all_article_ids.extend(msg_data.get('article_ids', []))
+            else:
+                all_article_ids = digest_entry.get('article_ids', [])
+                logger.debug(f"Usando entrada __digest__ → {len(all_article_ids)} artículos")
+
+            unique_ids = list(dict.fromkeys(all_article_ids))  # deduplicar preservando orden
+
             # Filtrar: obtener solo los que NO están marcados (no tienen reacción)
             unreacted = [
                 aid for aid in unique_ids
                 if not self.state_manager.is_marked(aid)
             ]
-            
+
             if not unreacted:
                 logger.warning("⚠️  No hay artículos sin reaccionar")
                 self._answer_callback_query(callback_id, "⚠️ Todos los artículos tienen reacción")
                 return
-            
+
             logger.debug(f"Artículos sin reaccionar: {len(unreacted)}/{len(unique_ids)}")
             logger.debug(f"Primeros 10 IDs: {unreacted[:10]}")
-            
+
             # Marcar en TT-RSS
             start_time = time.time()
             self.ttrss_client.mark_articles_as_read(unreacted)
             elapsed = time.time() - start_time
-            
+
             logger.debug(f"← _handle_mark_unreacted() → {len(unreacted)} marcados en {elapsed:.2f}s")
             logger.info(f"✅ No reaccionados marcados: {len(unreacted)}/{len(unique_ids)} artículos ({elapsed:.2f}s)")
-            
+
             self._answer_callback_query(callback_id, f"✅ {len(unreacted)} artículos sin reacción marcados")
-            
+
         except Exception as e:
             logger.error(f"❌ Error marcando no reaccionados: {e}", exc_info=True)
             self._answer_callback_query(callback_id, "❌ Error marcando artículos")

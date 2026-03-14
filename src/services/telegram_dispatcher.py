@@ -134,7 +134,11 @@ class TelegramDispatcher:
         
         total_messages = 0
         total_articles = 0
-        
+
+        # Acumula todos los IDs del digest para el mensaje final con botones
+        all_digest_ids: list[int] = []
+        all_digest_ids_seen: set[int] = set()
+
         # Enviar cada resumen a su topic correspondiente
         for category, summary in summaries.items():
             logger.debug(f"Procesando categoría: {category}")
@@ -153,6 +157,11 @@ class TelegramDispatcher:
             # Dividir resumen en párrafos y enviar mensajes individuales
             paragraphs = self._split_summary_by_paragraphs(summary)
             messages_sent = 0
+
+            # Acumula todos los IDs enviados en este flujo para asociarlos
+            # al mensaje con botones al final
+            flow_article_ids: list[int] = []
+            flow_article_ids_seen: set[int] = set()
             
             for i, paragraph in enumerate(paragraphs, 1):
                 # Extraer IDs de artículos mencionados en este párrafo
@@ -200,6 +209,11 @@ class TelegramDispatcher:
                         category=category,
                         timestamp=datetime.now()
                     )
+                    # Acumular para el mensaje con botones (deduplicando)
+                    for aid in valid_article_ids:
+                        if aid not in flow_article_ids_seen:
+                            flow_article_ids_seen.add(aid)
+                            flow_article_ids.append(aid)
                     logger.debug(f"✅ Mapeo guardado: msg {message_id} → {len(valid_article_ids)} artículos")
                 else:
                     logger.debug(f"⚠️  Párrafo {i} sin IDs mencionados, no se guarda mapeo (msg {message_id})")
@@ -222,11 +236,19 @@ class TelegramDispatcher:
             logger.info(f"✅ Resumen de {category} enviado ({messages_sent} mensajes, {num_articles} artículos)")
             
             # Enviar botones de gestión para este topic
+            # Se pasan los IDs del flujo para mapear el mensaje con botones
             self._send_topic_buttons(
                 topic_id=topic_id,
                 category=category,
-                num_articles=num_articles
+                num_articles=num_articles,
+                article_ids=flow_article_ids
             )
+
+            # Acumular IDs del flujo en el total del digest (deduplicando)
+            for aid in flow_article_ids:
+                if aid not in all_digest_ids_seen:
+                    all_digest_ids_seen.add(aid)
+                    all_digest_ids.append(aid)
             
             # Delay entre categorías para evitar rate limiting
             time.sleep(settings.TELEGRAM_CATEGORY_DELAY)
@@ -237,7 +259,8 @@ class TelegramDispatcher:
             total_categories=len(summaries),
             total_messages=total_messages,
             total_articles=total_articles,
-            topic_id=None  # Chat principal (sin topic específico)
+            topic_id=None,  # Chat principal (sin topic específico)
+            article_ids=all_digest_ids
         )
         
         logger.debug(f"← _send_supergroup_mode() → {total_messages} mensajes, {total_articles} artículos")
@@ -247,15 +270,22 @@ class TelegramDispatcher:
         self,
         topic_id: int,
         category: str,
-        num_articles: int
+        num_articles: int,
+        article_ids: list[int] = None
     ):
         """
         Envía botones de gestión para un topic específico.
-        
+
+        Guarda el message_id del mensaje con botones en el message_map
+        asociado a los article_ids del flujo, permitiendo que el botón
+        "Marcar categoría" marque exactamente esos artículos y no el
+        historial acumulado de días anteriores.
+
         Args:
             topic_id: ID del topic
             category: Nombre de la categoría
             num_articles: Número de artículos en este topic
+            article_ids: IDs de artículos enviados en este flujo
         """
         logger.debug(f"→ _send_topic_buttons(topic={topic_id}, cat={category}, articles={num_articles})")
         
@@ -286,6 +316,19 @@ class TelegramDispatcher:
 
             logger.debug(f"← _send_topic_buttons() → msg_id={message_id} (elapsed={elapsed:.2f}s)")
             logger.info(f"✅ Botones de gestión enviados al topic {topic_id} (msg_id: {message_id})")
+
+            # Guardar mapeo del mensaje con botones → IDs del flujo
+            if article_ids and self.state_manager:
+                self.state_manager.save_message_mapping(
+                    message_id=message_id,
+                    article_ids=article_ids,
+                    category=category,
+                    timestamp=datetime.now()
+                )
+                logger.debug(
+                    f"✅ Mapeo botones guardado: msg {message_id} → "
+                    f"{len(article_ids)} artículos ({category})"
+                )
         except Exception as e:
             logger.error(f"❌ Error enviando botones para topic={topic_id}, category={category}: {e}", exc_info=True)
             # No bloquear el envío global
@@ -350,16 +393,22 @@ class TelegramDispatcher:
         total_categories: int,
         total_messages: int,
         total_articles: int,
-        topic_id: Optional[int] = None
+        topic_id: Optional[int] = None,
+        article_ids: list[int] = None
     ):
         """
         Envía mensaje final con estadísticas y botones de batch marking global.
-        
+
+        Guarda el message_id del mensaje en el message_map con todos los IDs
+        del digest, permitiendo que "Marcar TODOS" y "Solo no reaccionados"
+        operen solo sobre los artículos de este digest específico.
+
         Args:
             total_categories: Total de categorías procesadas
             total_messages: Total de mensajes enviados
             total_articles: Total de artículos
             topic_id: ID del topic donde enviar (default: None = chat principal)
+            article_ids: Todos los IDs del digest completo
         """
         logger.debug(f"→ _send_final_summary_message(cats={total_categories}, msgs={total_messages}, articles={total_articles})")
         
@@ -396,6 +445,19 @@ class TelegramDispatcher:
 
             logger.debug(f"← _send_final_summary_message() → msg_id={message_id} (elapsed={elapsed:.2f}s)")
             logger.info(f"✅ Mensaje final enviado (msg_id: {message_id})")
+
+            # Guardar mapeo del mensaje final → todos los IDs del digest
+            if article_ids and self.state_manager:
+                self.state_manager.save_message_mapping(
+                    message_id=message_id,
+                    article_ids=article_ids,
+                    category="__digest__",
+                    timestamp=datetime.now()
+                )
+                logger.debug(
+                    f"✅ Mapeo mensaje final guardado: msg {message_id} → "
+                    f"{len(article_ids)} artículos"
+                )
         except Exception as e:
             logger.error(f"❌ Error enviando mensaje final: {e}", exc_info=True)
             return None
