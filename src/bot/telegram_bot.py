@@ -96,7 +96,7 @@ class TelegramBot:
         # Modo SUPERGROUP: Botones de marcado por categoría
         elif data.startswith('category:mark:'):
             category = data.replace('category:mark:', '')
-            self._handle_mark_category(callback_id, category, user)
+            self._handle_mark_category(callback_id, category, user, message_id)
         
         elif data.startswith('category:exclude:'):
             category = data.replace('category:exclude:', '')
@@ -164,54 +164,43 @@ class TelegramBot:
         
         logger.debug(f"← _handle_chat_callback() completado")
     
-    def _handle_mark_category(self, callback_id: str, category: str, user: str):
+    def _handle_mark_category(self, callback_id: str, category: str, user: str, button_message_id: int = None):
         """
         Marca como leídos los artículos del flujo asociado al botón presionado.
 
-        Usa el message_id del mensaje con botones para obtener exactamente
-        los artículos enviados en ese flujo, evitando marcar artículos de
-        otros días o ejecuciones anteriores.
+        Usa el message_id del botón presionado para obtener exactamente
+        los artículos del flujo correspondiente, sin importar el día.
 
         Args:
-            callback_id: ID del callback — contiene el message_id del botón
+            callback_id: ID del callback
             category: Nombre de la categoría
             user: Nombre del usuario
+            button_message_id: message_id del mensaje con botones presionado
         """
-        logger.debug(f"→ _handle_mark_category(category={category}, user={user})")
+        logger.debug(f"→ _handle_mark_category(category={category}, user={user}, btn_msg={button_message_id})")
         logger.info(f"Marcando categoría: {category}")
 
         try:
-            # Obtener el message_id del mensaje con botones desde el callback
-            # El callback_query trae el mensaje que contiene el botón presionado
-            # — se resuelve en handle_callback_query y se pasa como contexto
             message_map = self.state_manager.load_message_map()
 
-            # Buscar en el mapa los IDs asociados a esta categoría
-            # Dado que el dispatcher ahora guarda el message_id del botón
-            # con todos los IDs del flujo, basta con buscar por categoría
-            # y tomar la entrada más reciente (la del botón)
-            candidates = {
-                msg_id: data
-                for msg_id, data in message_map.items()
-                if data.get('category') == category
-            }
+            # Usar el message_id del botón presionado directamente
+            key = str(button_message_id)
+            entry = message_map.get(key)
 
-            if not candidates:
-                logger.warning(f"⚠️  No se encontraron artículos para categoría: {category}")
-                self._answer_callback_query(callback_id, f"⚠️ No hay artículos en {category}")
-                logger.debug(f"← _handle_mark_category() → sin artículos")
+            if entry is None:
+                logger.warning(
+                    f"⚠️  message_id {button_message_id} no encontrado en message_map "
+                    f"(puede ser un digest anterior al fix)"
+                )
+                self._answer_callback_query(callback_id, f"⚠️ No hay artículos registrados para este botón")
+                logger.debug(f"← _handle_mark_category() → message_id no encontrado")
                 return
 
-            # Tomar la entrada más reciente (el mensaje con botones del último flujo)
-            latest_msg_id = max(
-                candidates,
-                key=lambda k: candidates[k].get('timestamp', '')
-            )
-            article_ids = candidates[latest_msg_id].get('article_ids', [])
+            article_ids = entry.get('article_ids', [])
             unique_ids = list(dict.fromkeys(article_ids))  # deduplicar preservando orden
 
             logger.debug(
-                f"Usando msg_id={latest_msg_id} ({candidates[latest_msg_id].get('timestamp')}) "
+                f"Usando msg_id={button_message_id} ({entry.get('timestamp')}) "
                 f"→ {len(unique_ids)} artículos"
             )
 
