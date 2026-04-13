@@ -4,6 +4,7 @@ Escucha updates (clicks, comandos, reacciones) y responde usando el TelegramClie
 Soporta modo chat (1:1) y supergroup (con topics).
 """
 import logging
+import re
 import requests
 import time
 from typing import Optional
