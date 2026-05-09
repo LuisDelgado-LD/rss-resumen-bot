@@ -72,7 +72,7 @@ class WallabagClient:
             expires_in = token_data.get('expires_in', 3600)
             self.token_expires_at = time.time() + expires_in - 300
             
-            logger.debug(f"Token obtenido, expira en {expires_in}s")
+            logger.info(f"✅ Token Wallabag obtenido, expira en {expires_in}s")
             logger.debug("← _get_access_token() → True")
             return True
             

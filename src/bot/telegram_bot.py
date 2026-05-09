@@ -200,9 +200,9 @@ class TelegramBot:
             article_ids = entry.get('article_ids', [])
             unique_ids = list(dict.fromkeys(article_ids))  # deduplicar preservando orden
 
-            logger.debug(
-                f"Usando msg_id={button_message_id} ({entry.get('timestamp')}) "
-                f"→ {len(unique_ids)} artículos"
+            logger.info(
+                f"→ Marcando {len(unique_ids)} artículos de {category} "
+                f"(msg_id={button_message_id})"
             )
 
             if not unique_ids:
@@ -272,8 +272,8 @@ class TelegramBot:
                 self._answer_callback_query(callback_id, f"⚠️ No hay artículos en {category}")
                 return
             
-            logger.debug(f"Artículos encontrados: {len(article_ids)}")
-            logger.debug(f"Primeros 10 IDs: {article_ids[:10]}")
+            logger.info(f"→ Marcando {len(article_ids)} artículos de {category} en TT-RSS")
+            logger.debug(f"IDs: {article_ids[:10]}{"..." if len(article_ids) > 10 else ""}")
             
             # Marcar en TT-RSS
             start_time = time.time()
@@ -324,8 +324,8 @@ class TelegramBot:
                 self._answer_callback_query(callback_id, "⚠️ No hay artículos pendientes")
                 return
 
-            logger.debug(f"Artículos únicos encontrados: {len(unique_ids)}")
-            logger.debug(f"Primeros 10 IDs: {unique_ids[:10]}")
+            logger.info(f"→ Marcando {len(unique_ids)} artículos (todos) en TT-RSS")
+            logger.debug(f"IDs: {unique_ids[:10]}{"..." if len(unique_ids) > 10 else ""}")
 
             # Marcar en TT-RSS
             start_time = time.time()
@@ -382,8 +382,8 @@ class TelegramBot:
                 self._answer_callback_query(callback_id, "⚠️ Todos los artículos tienen reacción")
                 return
 
-            logger.debug(f"Artículos sin reaccionar: {len(unreacted)}/{len(unique_ids)}")
-            logger.debug(f"Primeros 10 IDs: {unreacted[:10]}")
+            logger.info(f"→ Marcando {len(unreacted)}/{len(unique_ids)} artículos sin reacción en TT-RSS")
+            logger.debug(f"IDs: {unreacted[:10]}{"..." if len(unreacted) > 10 else ""}")
 
             # Marcar en TT-RSS
             start_time = time.time()

@@ -85,7 +85,7 @@ class LLMClient:
             elapsed = time.time() - self.last_request_time
             if elapsed < self.min_request_interval:
                 wait_time = self.min_request_interval - elapsed
-                logger.debug(f"Rate limit: esperando {wait_time:.1f}s")
+                logger.warning(f"⚠️ Rate limit: esperando {wait_time:.1f}s antes del siguiente request")
                 time.sleep(wait_time)
     
     def _generate_with_retry(
@@ -146,7 +146,7 @@ class LLMClient:
                 # Métricas
                 if hasattr(response, 'usage_metadata'):
                     metadata = response.usage_metadata
-                    logger.debug(
+                    logger.info(
                         f"← Tokens: prompt={metadata.prompt_token_count}, "
                         f"response={metadata.candidates_token_count}, "
                         f"total={metadata.total_token_count}"
