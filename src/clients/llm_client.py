@@ -71,7 +71,7 @@ class LLMClient:
         
         # Rate limiting
         self.last_request_time = 0
-        self.min_request_interval = 60 / 15  # 15 RPM = 4 segundos entre requests
+        self.min_request_interval = 60 / settings.LLM_RPM  # segundos entre requests según LLM_RPM
         
         # Prompt manager
         self.prompt_manager = PromptManager()

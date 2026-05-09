@@ -118,6 +118,7 @@ class Settings:
     # Configuración de Resumen
     MAX_SUMMARY_TOKENS: int = int(_clean_env_value("MAX_SUMMARY_TOKENS", "2000"))
     LLM_TEMPERATURE: float = float(_clean_env_value("LLM_TEMPERATURE", "0.3"))
+    LLM_RPM: int = int(_clean_env_value("LLM_RPM", "5"))
 
     def validate(self) -> tuple[bool, list[str]]:
         """
