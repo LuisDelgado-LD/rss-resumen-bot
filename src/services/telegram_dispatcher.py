@@ -235,14 +235,20 @@ class TelegramDispatcher:
             
             logger.info(f"✅ Resumen de {category} enviado ({messages_sent} mensajes, {num_articles} artículos)")
             
-            # Enviar botones de gestión para este topic
-            # Se pasan los IDs del flujo para mapear el mensaje con botones
-            self._send_topic_buttons(
-                topic_id=topic_id,
-                category=category,
-                num_articles=num_articles,
-                article_ids=flow_article_ids
-            )
+            # Enviar botones de gestión solo si hay artículos con IDs válidos
+            # Si el resumen falló (rate limit u otro error), flow_article_ids
+            # estará vacío y no tiene sentido ofrecer marcar como leído
+            if flow_article_ids:
+                self._send_topic_buttons(
+                    topic_id=topic_id,
+                    category=category,
+                    num_articles=num_articles,
+                    article_ids=flow_article_ids
+                )
+            else:
+                logger.warning(
+                    f"⚠️ Sin IDs válidos para {category}, omitiendo botones de gestión"
+                )
 
             # Acumular IDs del flujo en el total del digest (deduplicando)
             for aid in flow_article_ids:
