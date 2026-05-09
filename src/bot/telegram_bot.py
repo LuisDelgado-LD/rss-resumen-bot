@@ -210,8 +210,17 @@ class TelegramBot:
                 logger.debug(f"← _handle_mark_category() → sin artículos válidos")
                 return
 
+            # Construir metadatos para el registro de marcado
+            articles_meta = []
+            for aid in unique_ids:
+                article = self._resolve_article(aid)
+                articles_meta.append({
+                    "article_id": aid,
+                    "url": article.get("link", "") if article else ""
+                })
+
             # Marcar en StateManager y TT-RSS
-            self.state_manager.mark_read(unique_ids)
+            self.state_manager.mark_read(unique_ids, category=category, articles_meta=articles_meta)
             start_time = time.time()
             self.ttrss_client.mark_articles_as_read(unique_ids)
             elapsed = time.time() - start_time
@@ -741,8 +750,16 @@ class TelegramBot:
                         self._send_message(chat_id, notify_msg, topic_id=topic_id)
 
                     # Marcar como leído en TT-RSS
+                    reaction_article = self._resolve_article(article_id)
+                    self.state_manager.mark_read(
+                        [article_id],
+                        category=msg_data.get("category", "desconocida"),
+                        articles_meta=[{
+                            "article_id": article_id,
+                            "url": reaction_article.get("link", "") if reaction_article else ""
+                        }]
+                    )
                     self.ttrss_client.mark_articles_as_read([article_id])
-                    self.state_manager.mark_read([article_id])
                     logger.info(f"✅ Artículo {article_id} marcado como leído en TT-RSS")
                 else:
                     failed_count += 1
@@ -826,9 +843,17 @@ class TelegramBot:
             logger.debug(f"IDs: {article_ids}")
             
             try:
-                # Guardar en StateManager (para tracking)
-                self.state_manager.mark_read(article_ids)
-                
+                # Construir metadatos y registrar en StateManager
+                reaction_meta = []
+                for aid in article_ids:
+                    reaction_art = self._resolve_article(aid)
+                    reaction_meta.append({
+                        "article_id": aid,
+                        "url": reaction_art.get("link", "") if reaction_art else ""
+                    })
+                reaction_category = msg_data.get("category", "desconocida") if msg_data else "desconocida"
+                self.state_manager.mark_read(article_ids, category=reaction_category, articles_meta=reaction_meta)
+
                 # Marcar en TT-RSS
                 start_time = time.time()
                 self.ttrss_client.mark_articles_as_read(article_ids)

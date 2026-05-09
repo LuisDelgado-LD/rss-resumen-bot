@@ -199,26 +199,64 @@ class StateManager:
         logger.debug(f"← mark_excluded() → total excluidos: {len(excluded)}")
         logger.info(f"✅ Excluidos: {len(article_ids)} artículos (total: {len(excluded)})")
     
-    def mark_read(self, article_ids: list[int]):
+    def mark_read(
+        self,
+        article_ids: list[int],
+        category: str = "desconocida",
+        articles_meta: list[dict] = None
+    ):
         """
-        Marca artículos como leídos individualmente (reacción ❤️).
-        
+        Marca artículos como leídos registrando metadatos para auditoría.
+
+        El archivo marked_articles.json se estructura por fecha y hora
+        del marcado, agrupando los artículos de un mismo evento:
+
+        {
+          "2026-04-13": {
+            "08:15:32": {
+              "category": "Noticias Seguridad",
+              "articles": [
+                {"article_id": 187641, "url": "https://..."}
+              ]
+            }
+          }
+        }
+
         Args:
             article_ids: Lista de IDs de artículos a marcar
+            category: Categoría a la que pertenecen los artículos
+            articles_meta: Lista de dicts con {article_id, url} para
+                           enriquecer el registro. Si None, solo se
+                           guarda el article_id sin URL.
         """
-        logger.debug(f"→ mark_read(articles={len(article_ids)})")
+        logger.debug(f"→ mark_read(articles={len(article_ids)}, category={category})")
 
-        marked = self._load_json(self.marked_file, [])
+        marked = self._load_json(self.marked_file, {})
 
-        # Agregar sin duplicados
-        for article_id in article_ids:
-            if article_id not in marked:
-                marked.append(article_id)
+        now = datetime.now()
+        date_key = now.strftime("%Y-%m-%d")
+        time_key = now.strftime("%H:%M:%S")
+
+        # Construir lista de artículos con metadatos
+        meta_by_id = {m["article_id"]: m.get("url", "") for m in (articles_meta or [])}
+        articles_list = [
+            {"article_id": aid, "url": meta_by_id.get(aid, "")}
+            for aid in article_ids
+        ]
+
+        # Insertar en la estructura fecha → hora → {category, articles}
+        if date_key not in marked:
+            marked[date_key] = {}
+
+        marked[date_key][time_key] = {
+            "category": category,
+            "articles": articles_list,
+        }
 
         self._save_json(self.marked_file, marked)
 
-        logger.debug(f"← mark_read() → total marcados: {len(marked)}")
-        logger.info(f"✅ Marcados: {len(article_ids)} artículos (total: {len(marked)})")
+        logger.debug(f"← mark_read() → guardado en {date_key}/{time_key}")
+        logger.info(f"✅ Marcados: {len(article_ids)} artículos (categoría: {category})")
     
     def is_excluded(self, article_id: int) -> bool:
         """Verifica si un artículo está excluido."""
@@ -227,8 +265,13 @@ class StateManager:
     
     def is_marked(self, article_id: int) -> bool:
         """Verifica si un artículo ya fue marcado individualmente."""
-        marked = self._load_json(self.marked_file, [])
-        return article_id in marked
+        marked = self._load_json(self.marked_file, {})
+        for date_data in marked.values():
+            for time_data in date_data.values():
+                for article in time_data.get("articles", []):
+                    if article.get("article_id") == article_id:
+                        return True
+        return False
     
     def get_pending_articles(self, all_article_ids: list[int]) -> list[int]:
         """
