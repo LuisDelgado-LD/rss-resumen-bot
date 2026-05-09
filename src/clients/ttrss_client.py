@@ -561,28 +561,31 @@ class TTRSSClient:
             logger.debug(f"← get_article_by_id() → None (error)")
             return None
     
-    def mark_articles_as_read(self, article_ids: list[int]) -> None:
+    def mark_articles_as_read(self, article_ids: list[int]) -> int:
         """
         Marca artículos como leídos en TT-RSS.
-        
+
         Args:
             article_ids: Lista de IDs de artículos a marcar
+
+        Returns:
+            Cantidad de artículos efectivamente actualizados según TT-RSS
         """
         if not article_ids:
             logger.debug("→ mark_articles_as_read([]) - lista vacía, saltando")
             logger.info("No hay artículos para marcar como leídos")
-            return
-        
+            return 0
+
         logger.debug(f"→ mark_articles_as_read({len(article_ids)} IDs)")
         logger.debug(f"Primeros 10 IDs: {article_ids[:10]}")
-        logger.info(f"Marcando {len(article_ids)} artículos como leídos...")
-        
+        logger.info(f"→ Marcando {len(article_ids)} artículos como leídos en TT-RSS...")
+
         # TT-RSS acepta IDs como string separado por comas
         ids_str = ",".join(str(id) for id in article_ids)
-        
+
         try:
             start_time = time.time()
-            self._make_request(
+            response = self._make_request(
                 "updateArticle",
                 {
                     "article_ids": ids_str,
@@ -591,10 +594,17 @@ class TTRSSClient:
                 }
             )
             elapsed = time.time() - start_time
-            
-            logger.debug(f"← mark_articles_as_read() completado en {elapsed:.2f}s")
-            logger.info(f"✅ {len(article_ids)} artículos marcados como leídos")
-            
+
+            updated = response.get("content", {}).get("updated", 0)
+
+            logger.debug(f"← mark_articles_as_read() → updated={updated} en {elapsed:.2f}s")
+            logger.info(
+                f"✅ TT-RSS confirmó {updated}/{len(article_ids)} artículos marcados "
+                f"({elapsed:.2f}s)"
+            )
+
+            return updated
+
         except TTRSSClientError as e:
             logger.error(f"❌ Error marcando artículos como leídos: {e}", exc_info=True)
             raise

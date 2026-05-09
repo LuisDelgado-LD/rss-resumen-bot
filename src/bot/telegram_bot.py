@@ -116,7 +116,7 @@ class TelegramBot:
         
         # LEGACY: Compatibilidad con callbacks antiguos
         elif data.startswith('mark_topic_'):
-            self._handle_mark_topic(callback_id, data, user)
+            self._handle_mark_topic(callback_id, data, user, chat_id, topic_id)
         
         elif data == 'mark_all':
             self._handle_mark_all(callback_id, user)
@@ -219,20 +219,32 @@ class TelegramBot:
                     "url": article.get("link", "") if article else ""
                 })
 
-            # Marcar en StateManager y TT-RSS
-            self.state_manager.mark_read(unique_ids, category=category, articles_meta=articles_meta)
+            # Marcar en TT-RSS primero y evaluar confirmación
             start_time = time.time()
-            self.ttrss_client.mark_articles_as_read(unique_ids)
+            updated = self.ttrss_client.mark_articles_as_read(unique_ids)
             elapsed = time.time() - start_time
 
-            logger.debug(f"← _handle_mark_category() → {len(unique_ids)} marcados en {elapsed:.2f}s")
-            logger.info(f"✅ Categoría {category} marcada: {len(unique_ids)} artículos ({elapsed:.2f}s)")
-
-            self._answer_callback_query(callback_id, f"✅ {len(unique_ids)} artículos de {category} marcados")
+            if updated == len(unique_ids):
+                self.state_manager.mark_read(unique_ids, category=category, articles_meta=articles_meta)
+                logger.info(f"✅ Categoría {category} marcada: {updated}/{len(unique_ids)} artículos ({elapsed:.2f}s)")
+                self._answer_callback_query(callback_id, f"✅ {updated} artículos de {category} marcados")
+            else:
+                logger.error(f"❌ Fallo al marcar {category}: TT-RSS confirmó {updated}/{len(unique_ids)}")
+                self._answer_callback_query(callback_id, "❌ Error al marcar")
+                self._send_message(
+                    chat_id,
+                    f"❌ Error marcando **{category}**: TT-RSS confirmó {updated} de {len(unique_ids)} artículos.",
+                    topic_id=topic_id
+                )
 
         except Exception as e:
             logger.error(f"❌ Error marcando categoría {category}: {e}", exc_info=True)
-            self._answer_callback_query(callback_id, f"❌ Error marcando {category}")
+            self._answer_callback_query(callback_id, "❌ Error al marcar")
+            self._send_message(
+                chat_id,
+                f"❌ Error inesperado marcando **{category}**: {e}",
+                topic_id=topic_id
+            )
             logger.debug(f"← _handle_mark_category() → error")
     
     def _handle_exclude_category(self, callback_id: str, category: str, user: str):
@@ -254,46 +266,55 @@ class TelegramBot:
         
         logger.debug(f"← _handle_exclude_category() → no implementado")
     
-    def _handle_mark_topic(self, callback_id: str, data: str, user: str):
+    def _handle_mark_topic(self, callback_id: str, data: str, user: str, chat_id: int = None, topic_id: int = None):
         """
-        Marca todos los artículos de un topic como leídos.
-        
+        Marca todos los artículos de un topic como leídos (handler legacy).
+
         Args:
             callback_id: ID del callback
             data: Callback data (formato: mark_topic_{category})
             user: Nombre del usuario
+            chat_id: ID del chat para enviar mensajes de error
+            topic_id: ID del topic donde enviar mensajes de error
         """
         category = data.replace('mark_topic_', '')
-        
+
         logger.debug(f"→ _handle_mark_topic(category={category}, user={user})")
         logger.info(f"Marcando topic completo: {category}")
-        
+
         try:
-            # Obtener todos los mensajes de esta categoría desde StateManager
             message_map = self.state_manager.load_message_map()
             article_ids = []
             for msg_id, msg_data in message_map.items():
                 if msg_data.get('category') == category:
                     article_ids.extend(msg_data.get('article_ids', []))
-            
+
+            article_ids = list(dict.fromkeys(article_ids))
+
             if not article_ids:
                 logger.warning(f"⚠️  No se encontraron artículos para categoría: {category}")
                 self._answer_callback_query(callback_id, f"⚠️ No hay artículos en {category}")
                 return
-            
+
             logger.info(f"→ Marcando {len(article_ids)} artículos de {category} en TT-RSS")
-            logger.debug(f"IDs: {article_ids[:10]}{"..." if len(article_ids) > 10 else ""}")
-            
-            # Marcar en TT-RSS
+            logger.debug(f"IDs: {article_ids[:10]}{'...' if len(article_ids) > 10 else ''}")
+
             start_time = time.time()
-            self.ttrss_client.mark_articles_as_read(article_ids)
+            updated = self.ttrss_client.mark_articles_as_read(article_ids)
             elapsed = time.time() - start_time
-            
-            logger.debug(f"← _handle_mark_topic() → {len(article_ids)} marcados en {elapsed:.2f}s")
-            logger.info(f"✅ Topic {category} marcado: {len(article_ids)} artículos ({elapsed:.2f}s)")
-            
-            self._answer_callback_query(callback_id, f"✅ {len(article_ids)} artículos de {category} marcados")
-            
+
+            if updated == len(article_ids):
+                logger.info(f"✅ Topic {category} marcado: {updated}/{len(article_ids)} artículos ({elapsed:.2f}s)")
+                self._answer_callback_query(callback_id, f"✅ {updated} artículos de {category} marcados")
+            else:
+                logger.error(f"❌ Fallo marcando topic {category}: TT-RSS confirmó {updated}/{len(article_ids)}")
+                self._answer_callback_query(callback_id, "❌ Error al marcar")
+                self._send_message(
+                    chat_id,
+                    f"❌ Error marcando **{category}**: TT-RSS confirmó {updated} de {len(article_ids)} artículos.",
+                    topic_id=topic_id
+                )
+
         except Exception as e:
             logger.error(f"❌ Error marcando topic {category}: {e}", exc_info=True)
             self._answer_callback_query(callback_id, f"❌ Error marcando {category}")
